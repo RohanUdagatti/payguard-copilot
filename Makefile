@@ -1,9 +1,15 @@
 PYTHON ?= python
 PIP ?= pip
 COMPOSE ?= docker compose
-PACKAGE_EXTRAS ?= .[core,dev]
+PACKAGE_EXTRAS ?= .[core,dev,rag]
 
-.PHONY: up down test lint format typecheck install env
+.PHONY: up down test lint format typecheck install env ingest rag-serve
+
+ingest: env
+	QDRANT_HOST=localhost $(PYTHON) scripts/ingest.py --docs-dir data/raw_docs $(INGEST_ARGS)
+
+rag-serve: env
+	QDRANT_HOST=localhost $(PYTHON) -m uvicorn payguard.gateway.main:app --host 0.0.0.0 --port 8000
 
 env:
 	@test -f .env || cp .env.example .env

@@ -13,6 +13,7 @@ from pythonjsonlogger.json import JsonFormatter
 
 from payguard import __version__
 from payguard.config import Settings, get_settings
+from payguard.gateway.routes.rag import router as rag_router
 
 
 def configure_logging(log_level: str) -> None:
@@ -58,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = resolved
+    app.include_router(rag_router)
 
     @app.get("/health")
     def health() -> dict[str, Any]:

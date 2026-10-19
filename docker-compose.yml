@@ -122,6 +122,9 @@ services:
       REDIS_HOST: redis
       QDRANT_HOST: qdrant
       LANGFUSE_HOST: http://langfuse:3000
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.8-flash}
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
@@ -134,8 +137,8 @@ services:
         ]
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 25s
+      retries: 15
+      start_period: 90s
 
 volumes:
   payguard_postgres_data:

@@ -18,7 +18,7 @@ COPY src ./src
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip==25.0.1 \
-    && /opt/venv/bin/pip install ".[core]"
+    && /opt/venv/bin/pip install ".[core,rag]"
 
 
 FROM python:3.11.11-slim-bookworm AS runtime

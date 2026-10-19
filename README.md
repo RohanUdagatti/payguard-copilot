@@ -2,37 +2,47 @@
 
 Enterprise GenAI platform for payment disputes, fraud and compliance.
 
-Phase 0 provides a production-style repository scaffold: FastAPI health endpoint,
-configuration via environment variables, Docker Compose infrastructure, and CI.
-
 ## Requirements
 
 - Python 3.11
 - Docker and Docker Compose
 - Make
+- `GEMINI_API_KEY` in local `.env` (for LLM answers)
 
 ## Setup
 
 ```bash
 cp .env.example .env
-python -m pip install -e ".[core,dev]"
+# add GEMINI_API_KEY=... to .env
+conda activate payguard   # or any Python 3.11 env
+pip install -e ".[core,dev,rag]"
 ```
 
-## Run
+## Run infrastructure + API
 
 ```bash
 make up
 curl http://localhost:8000/health
 ```
 
-`make up` waits until every service (including the API) reports healthy before returning.
-This starts PostgreSQL, Redis, Qdrant, Langfuse (v2 + its own Postgres), and the API.
+## RAG baseline (Phase 2)
 
-Stop services:
+Put PDFs in `data/raw_docs/` (gitignored), then:
 
 ```bash
-make down
+make ingest
+# rebuild collection after changing embedder:
+# make ingest INGEST_ARGS=--recreate
+
+curl -s http://localhost:8000/rag/query \
+  -H 'content-type: application/json' \
+  -d '{"question":"What does the Federal Reserve payment system risk policy cover?"}'
 ```
+
+Default embedding provider is **local** `BAAI/bge-small-en-v1.5`.
+Default LLM provider is **gemini** (`LLM_MODEL` from env).
+
+Design notes: [docs/rag_baseline.md](docs/rag_baseline.md).
 
 ## Test and quality
 
@@ -40,7 +50,6 @@ make down
 make test
 make lint
 make typecheck
-make format
 ```
 
 ## Layout
@@ -51,10 +60,11 @@ tests/
 scripts/
 docs/
 configs/
+eval/
 ```
 
 ## Notes
 
-- No business logic, LLM calls, or RAG code in Phase 0.
-- Secrets come from `.env` (never commit real credentials).
-- Langfuse is pinned to major version 2 to avoid the heavier v3 dependency stack.
+- Secrets stay in `.env` (never commit).
+- `/data/` is gitignored so PDFs are not committed.
+- Langfuse is pinned to v2.
