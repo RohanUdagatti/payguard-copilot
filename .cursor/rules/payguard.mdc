@@ -1,0 +1,24 @@
+---
+description: PayGuard Copilot project rules
+alwaysApply: true
+---
+
+PROJECT: PayGuard Copilot - enterprise GenAI platform for payment disputes, fraud and compliance.
+
+STACK: Python 3.11, FastAPI, LangChain + LangGraph, Qdrant, bge embeddings + reranker, PostgreSQL, Redis,
+XGBoost + SHAP + MLflow, Presidio, RAGAS + DeepEval, Langfuse, Docker, GitHub Actions, pytest.
+
+RULES:
+1. Show a plan and wait for approval before writing code.
+2. Provide complete working files, never diffs or "rest unchanged" placeholders.
+3. Make minimal, targeted changes. Do not modify working modules unless the task requires it. No regressions.
+4. No raw PAN/PII may reach any LLM prompt, log, vector DB or trace. Tokenize first.
+5. All LLM/tool calls need timeouts, retries, structured logging and an audit-log entry.
+6. SQL tool is read-only, allow-listed tables, row-limited, validated before execution.
+7. Every answer carries citations (doc, section, page, effective date).
+8. Config via env vars / pydantic-settings. No hardcoded secrets.
+9. Every module ships with pytest tests. A phase is done only when its tests pass.
+10. Type hints, docstrings, small functions. Layout: src/payguard/{gateway,rag,data,ml,agents,security,eval,platform}.
+11. If ambiguous, ask one concise question instead of guessing.
+12. At the end of each phase report: files created, how to run, how to test, known limitations.
+13. Never invent metrics or claim a command passed unless you ran it and saw the output.

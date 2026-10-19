@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools==75.8.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "payguard"
+version = "0.1.0"
+description = "PayGuard Copilot — enterprise GenAI platform for payment disputes, fraud and compliance."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "PayGuard" }]
+dependencies = []
+
+[project.optional-dependencies]
+core = [
+    "fastapi==0.115.12",
+    "uvicorn[standard]==0.34.2",
+    "pydantic==2.11.3",
+    "pydantic-settings==2.8.1",
+    "python-json-logger==3.3.0",
+]
+dev = [
+    "ruff==0.11.5",
+    "black==25.1.0",
+    "mypy==1.15.0",
+    "pytest==8.3.5",
+    "pytest-cov==6.1.1",
+    "httpx==0.28.1",
+    "detect-secrets==1.5.0",
+    "pre-commit==4.2.0",
+    "types-python-dateutil==2.9.0.20241206",
+]
+rag = []
+ml = []
+eval = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+mypy_path = "src"
+packages = ["payguard"]
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+module = ["pythonjsonlogger.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --cov=payguard --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["payguard"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
