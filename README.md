@@ -15,7 +15,7 @@ Enterprise GenAI platform for payment disputes, fraud and compliance.
 cp .env.example .env
 # add GEMINI_API_KEY=... to .env
 conda activate payguard   # or any Python 3.11 env
-pip install -e ".[core,dev,rag]"
+pip install -e ".[core,dev,rag,data]"
 ```
 
 ## Run infrastructure + API
@@ -24,6 +24,24 @@ pip install -e ".[core,dev,rag]"
 make up
 curl http://localhost:8000/health
 ```
+
+## Data Layer (Phase 1)
+
+PostgreSQL schema (`merchants`, `cards`, `reason_codes`, `transactions`, `disputes`), Alembic migrations, and high-performance synthetic data generator.
+
+```bash
+# Run database migrations
+make migrate
+
+# Seed 500,000 synthetic transactions (~25 seconds)
+make seed
+
+# Reset database schema
+make reset-db
+```
+
+Details on schema, stochastic fraud probability model, and data dictionary: [docs/data_dictionary.md](docs/data_dictionary.md).
+
 
 ## RAG baseline (Phase 2)
 

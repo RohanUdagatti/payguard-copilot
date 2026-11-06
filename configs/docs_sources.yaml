@@ -1,0 +1,19 @@
+documents:
+  - doc_id: "fed_payment_risk"
+    title: "Federal Reserve Policy on Payment System Risk"
+    region: "US"
+    version: null
+    effective_date: "2023-07-20"
+
+  - doc_id: "visa_chargeback_guide"
+    title: "Visa Core Rules and Visa Product and Service Rules"
+    region: null
+    version: null
+    effective_date: "2026-04-18"
+
+  - doc_id: "nist_digital_identity_sp800_63b"
+    title: "Digital Identity Guidelines: Authentication and Lifecycle Management"
+    region: "US"
+    version: "SP 800-63B"
+    effective_date: null
+

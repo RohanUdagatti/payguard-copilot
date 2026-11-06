@@ -48,6 +48,15 @@ rag = [
     "redis>=5.0.0",
 ]
 ml = []
+data = [
+    "sqlalchemy==2.0.38",
+    "alembic==1.14.1",
+    "psycopg[binary]==3.2.5",
+    "faker==36.1.1",
+    "numpy==1.26.4",
+    "pyyaml==6.0.3",
+    "tqdm==4.67.1",
+]
 eval = [
     "ragas==0.4.3",
     "datasets==5.1.0",
@@ -92,6 +101,9 @@ module = [
     "yaml.*",
     "fastembed.*",
     "redis.*",
+    "psycopg.*",
+    "alembic.*",
+    "faker.*",
 ]
 ignore_missing_imports = true
 

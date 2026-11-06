@@ -1,9 +1,9 @@
 PYTHON ?= python
 PIP ?= pip
 COMPOSE ?= docker compose
-PACKAGE_EXTRAS ?= .[core,dev,rag]
+PACKAGE_EXTRAS ?= .[core,dev,rag,data]
 
-.PHONY: up down test lint format typecheck install env ingest rag-serve eval-gate eval-baseline
+.PHONY: up down test lint format typecheck install env ingest rag-serve eval-gate eval-baseline migrate seed seed-large reset-db
 
 ingest: env
 	QDRANT_HOST=localhost $(PYTHON) scripts/ingest.py --docs-dir data/raw_docs $(INGEST_ARGS)
@@ -44,3 +44,17 @@ eval-gate:
 
 eval-baseline:
 	$(PYTHON) scripts/eval_gate.py --create-baseline $(EVAL_ARGS)
+
+migrate: env
+	$(PYTHON) -m alembic upgrade head
+
+seed: env
+	$(PYTHON) scripts/seed_db.py --count $(or $(SEED_COUNT),500000)
+
+seed-large: env
+	$(PYTHON) scripts/seed_db.py --count 2000000
+
+reset-db: env
+	$(PYTHON) -m alembic downgrade base
+	$(PYTHON) -m alembic upgrade head
+
