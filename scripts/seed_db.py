@@ -35,9 +35,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(
-        f"Seeding database with {args.count:,} transactions (seed={args.seed})..."
-    )
+    print(f"Seeding database with {args.count:,} transactions (seed={args.seed})...")
     t0 = time.time()
     metrics = run_seed(
         num_transactions=args.count,
@@ -50,6 +48,7 @@ def main() -> None:
     print("=== SEEDING EXECUTION METRICS ===")
     print("=" * 65)
     print(f"Elapsed Time       : {elapsed:.2f} seconds")
+    print(f"Generator Hash     : {metrics['generator_params_hash']}")
     print(f"Transactions Seeded: {metrics['transactions']:,}")
     print(f"Disputes Generated : {metrics['disputes']:,}")
     print(
@@ -82,4 +81,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

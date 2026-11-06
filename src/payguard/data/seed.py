@@ -1,10 +1,11 @@
-"""High-performance synthetic data seeder for PayGuard Phase 1 schema."""
+"""High-performance synthetic data seeder for PayGuard Phase 1 schema (Generator V2)."""
 
 from __future__ import annotations
 
 import datetime
 import hashlib
 import io
+import json
 import logging
 import time
 from typing import Any
@@ -94,6 +95,102 @@ MCC_PRESETS = [
     ("5999", "Miscellaneous Retail", "MEDIUM", 0.05),
 ]
 
+# Immutable parameter specification for Generator V2
+GENERATOR_V2_CONFIG: dict[str, Any] = {
+    "version": "2.0.0",
+    "legit_activity": {
+        "lognormal_mu": -1.35,
+        "lognormal_sigma": 0.65,
+        "daily_hard_cap": 8,
+        "min_daily_rate": 0.01,
+        "max_daily_rate": 7.5,
+        "diurnal_standard": {
+            "night_weight": 0.005,  # hours 00-05 (~3% total)
+            "morning_weight": 0.035,  # hours 06-09 (~14% total)
+            "day_weight": 0.065,  # hours 10-19 (~65% total)
+            "evening_weight": 0.045,  # hours 20-23 (~18% total)
+        },
+        "night_owl_fraction": 0.04,
+        "traveller_fraction": 0.03,
+        "traveller_duration_days": [3, 7],
+        "favorite_merchants_per_card": [5, 15],
+        "favorite_merchant_probability": 0.75,
+        "channels": {
+            "POS": 0.60,
+            "ECOMMERCE": 0.32,
+            "ATM": 0.05,
+            "MOTO": 0.03,
+        },
+        "amount_base_scale": 50.0,
+        "amount_base_min": 5.0,
+        "amount_outlier_prob": 0.02,
+        "amount_outlier_range": [200.0, 1000.0],
+    },
+    "fraud_typologies": {
+        "compromised_bursts": {
+            "target_events": 120,
+            "burst_size": [3, 7],
+            "duration_hours": [1.0, 5.0],
+            "channels": {"ECOMMERCE": 0.60, "MOTO": 0.25, "POS": 0.15},
+            "amount_range": [35.0, 1200.0],
+            "prefer_non_favorite": True,
+        },
+        "card_testing": {
+            "target_events": 60,
+            "micro_count": [4, 8],
+            "duration_seconds": [10, 400],
+            "micro_amount_range": [0.50, 4.99],
+            "followup_large_prob": 0.50,
+            "followup_large_amount": [500.0, 2200.0],
+            "channel": "ECOMMERCE",
+            "merchant_risk": "HIGH",
+        },
+        "geographic_jump": {
+            "target_events": 260,
+            "time_gap_seconds": [1800, 4800],
+            "amount_range": [150.0, 1100.0],
+            "channels": {"POS": 0.70, "ECOMMERCE": 0.30},
+        },
+        "opportunistic_high_value": {
+            "target_events": 180,
+            "night_hours": [0, 5],
+            "amount_range": [600.0, 3500.0],
+            "channels": {"ECOMMERCE": 0.60, "MOTO": 0.40},
+            "prefer_non_favorite": True,
+        },
+        "stealth_fraud": {
+            "target_events": 360,
+            "daytime_hours": [10, 18],
+            "amount_range": [15.0, 85.0],
+            "channels": {"POS": 0.75, "ECOMMERCE": 0.25},
+            "merchant_risks": ["LOW", "MEDIUM"],
+        },
+    },
+    "disputes": {
+        "fraud_dispute_prob": 0.65,
+        "legit_dispute_prob": 0.0077,
+        "fraud_reasons": ["10.4", "10.5", "4837"],
+        "non_fraud_reasons": [
+            "13.1",
+            "13.3",
+            "12.1",
+            "11.3",
+            "4853",
+            "4834",
+        ],
+        "status_distribution": {
+            "OPEN": 0.40,
+            "UNDER_REVIEW": 0.30,
+            "WON": 0.15,
+            "LOST": 0.15,
+        },
+    },
+}
+
+GENERATOR_PARAMS_HASH = hashlib.sha256(
+    json.dumps(GENERATOR_V2_CONFIG, sort_keys=True).encode("utf-8")
+).hexdigest()
+
 
 def _get_connection_string(url: str | None = None) -> str:
     """Return a psycopg-compatible connection string."""
@@ -144,9 +241,9 @@ def seed_reason_codes(conn: psycopg.Connection[Any]) -> int:
 
 
 def seed_merchants(
-    conn: psycopg.Connection[Any], num_merchants: int, seed: int = 42
+    conn: psycopg.Connection[Any], num_merchants: int = 1000, seed: int = 42
 ) -> list[dict[str, Any]]:
-    """Seed synthetic merchants using streaming COPY."""
+    """Seed synthetic merchant accounts with category codes and risk tiers."""
     rng = np.random.default_rng(seed)
     mcc_codes = [m[0] for m in MCC_PRESETS]
     mcc_probs = [m[3] for m in MCC_PRESETS]
@@ -260,15 +357,13 @@ def seed_transactions_and_disputes(
     seed: int = 42,
     batch_size: int = 50000,
 ) -> tuple[int, int, float, float]:
-    """Generate and streaming-copy transactions and disputes."""
+    """Generate and streaming-copy transactions and disputes using Generator V2."""
     rng = np.random.default_rng(seed + 2)
     num_cards = len(cards)
     num_merchants = len(merchants)
-
-    # Power-law card weights to simulate real card activity
-    alpha = 1.3
-    weights = 1.0 / (np.arange(1, num_cards + 1) ** alpha)
-    weights /= weights.sum()
+    days = 90
+    total_seconds = days * 86400
+    start_date = datetime.datetime(2026, 8, 1, 0, 0, 0, tzinfo=datetime.UTC)
 
     merchant_ids = [m["merchant_id"] for m in merchants]
     merchant_mccs = [m["mcc"] for m in merchants]
@@ -278,58 +373,311 @@ def seed_transactions_and_disputes(
     card_tokens = [c["card_token"] for c in cards]
     card_countries = [c["issuer_country"] for c in cards]
 
-    channels = ["POS", "ECOMMERCE", "ATM", "MOTO"]
-    channel_probs = [0.60, 0.32, 0.05, 0.03]
+    # Pre-index high-risk online merchants for card testing
+    high_risk_online = [m for m in range(num_merchants) if merchant_risks[m] == "HIGH"]
+    if not high_risk_online:
+        high_risk_online = list(range(num_merchants))
 
-    statuses = ["APPROVED", "DECLINED", "REFUNDED"]
-    status_probs = [0.95, 0.04, 0.01]
+    low_med_merchants = [
+        m for m in range(num_merchants) if merchant_risks[m] in ("LOW", "MEDIUM")
+    ]
+    if not low_med_merchants:
+        low_med_merchants = list(range(num_merchants))
 
-    disp_statuses = ["OPEN", "UNDER_REVIEW", "WON", "LOST"]
-    disp_status_probs = [0.40, 0.30, 0.15, 0.15]
+    # 1. Card Personas and Favorites
+    is_night_owl = rng.random(size=num_cards) < 0.04
+    is_traveller = rng.random(size=num_cards) < 0.03
+    travel_start_day = rng.integers(10, 80, size=num_cards)
+    travel_dur = rng.integers(3, 8, size=num_cards)
+    travel_countries = ["GB", "FR", "DE", "JP", "AU"]
+    chosen_travel_country = rng.choice(travel_countries, size=num_cards)
+
+    card_favs: list[list[int]] = []
+    card_favs_set: list[set[int]] = []
+    for _ in range(num_cards):
+        k_fav = int(rng.integers(5, 16))
+        k_fav = min(k_fav, num_merchants)
+        favs = list(rng.choice(num_merchants, size=k_fav, replace=False))
+        card_favs.append(favs)
+        card_favs_set.append(set(favs))
+
+    # Scale fraud events proportionally with requested transaction count
+    scale = num_transactions / 500000.0
+    n_burst_events = max(1, int(round(120 * scale)))
+    n_testing_events = max(1, int(round(60 * scale)))
+    n_geo_events = max(1, int(round(260 * scale)))
+    n_opp_events = max(1, int(round(180 * scale)))
+    n_stealth_events = max(1, int(round(360 * scale)))
+
+    fraud_events: list[tuple[int, int, int, float, str, bool]] = []
+
+    # Typology 1: Compromised-card bursts
+    # (2-8 transactions in 1-6 hours, escalating amounts)
+    burst_cards = rng.choice(num_cards, size=n_burst_events, replace=False)
+    for c in burst_cards:
+        k_burst = int(rng.integers(3, 8))
+        t_start = int(rng.integers(0, total_seconds - 21600))
+        t_span = int(rng.integers(3600, 18000))
+        t_offsets = np.sort(rng.integers(0, t_span, size=k_burst))
+        amts = np.sort(np.round(rng.uniform(35.0, 1200.0, size=k_burst), 2))
+        non_favs = [m for m in range(num_merchants) if m not in card_favs_set[c]]
+        if not non_favs:
+            non_favs = list(range(num_merchants))
+        m_chosen = rng.choice(non_favs, size=k_burst)
+        chans = rng.choice(
+            ["ECOMMERCE", "MOTO", "POS"], p=[0.60, 0.25, 0.15], size=k_burst
+        )
+        for j in range(k_burst):
+            fraud_events.append(
+                (
+                    int(c),
+                    int(m_chosen[j]),
+                    int(t_start + t_offsets[j]),
+                    float(amts[j]),
+                    str(chans[j]),
+                    True,
+                )
+            )
+
+    # Typology 2: Card testing (rapid micro-transactions, then sometimes a large hit)
+    test_cards = rng.choice(num_cards, size=n_testing_events, replace=False)
+    for c in test_cards:
+        k_test = int(rng.integers(4, 9))
+        t_start = int(rng.integers(0, total_seconds - 3600))
+        t_offsets = np.sort(rng.integers(10, 400, size=k_test))
+        amts = np.round(rng.uniform(0.50, 4.99, size=k_test), 2)
+        m_chosen = rng.choice(high_risk_online, size=k_test)
+        for j in range(k_test):
+            fraud_events.append(
+                (
+                    int(c),
+                    int(m_chosen[j]),
+                    int(t_start + t_offsets[j]),
+                    float(amts[j]),
+                    "ECOMMERCE",
+                    True,
+                )
+            )
+        if rng.random() < 0.50:
+            big_amt = round(float(rng.uniform(500.0, 2200.0)), 2)
+            fraud_events.append(
+                (
+                    int(c),
+                    int(rng.choice(high_risk_online)),
+                    int(t_start + t_offsets[-1] + rng.integers(600, 1800)),
+                    big_amt,
+                    "ECOMMERCE",
+                    True,
+                )
+            )
+
+    # Typology 3: Geographic jump (foreign transaction shortly following a domestic one)
+    geo_cards = rng.choice(num_cards, size=n_geo_events, replace=False)
+    for c in geo_cards:
+        d_geo = int(rng.integers(0, days))
+        h_geo = int(rng.integers(8, 20))
+        sec_geo = d_geo * 86400 + h_geo * 3600 + int(rng.integers(0, 3600))
+        amt_geo = round(float(rng.uniform(150.0, 1100.0)), 2)
+        foreign_m = [
+            m
+            for m in range(num_merchants)
+            if merchant_countries[m] != card_countries[c]
+        ]
+        if not foreign_m:
+            foreign_m = list(range(num_merchants))
+        fraud_events.append(
+            (
+                int(c),
+                int(rng.choice(foreign_m)),
+                sec_geo,
+                amt_geo,
+                str(rng.choice(["POS", "ECOMMERCE"], p=[0.70, 0.30])),
+                True,
+            )
+        )
+
+    # Typology 4: Opportunistic single high-value fraud
+    opp_cards = rng.choice(num_cards, size=n_opp_events, replace=False)
+    for c in opp_cards:
+        d_opp = int(rng.integers(0, days))
+        h_opp = int(rng.integers(0, 6))
+        sec_opp = d_opp * 86400 + h_opp * 3600 + int(rng.integers(0, 3600))
+        amt_opp = round(float(rng.uniform(600.0, 3500.0)), 2)
+        non_favs = [m for m in range(num_merchants) if m not in card_favs_set[c]]
+        if not non_favs:
+            non_favs = list(range(num_merchants))
+        fraud_events.append(
+            (
+                int(c),
+                int(rng.choice(non_favs)),
+                sec_opp,
+                amt_opp,
+                str(rng.choice(["ECOMMERCE", "MOTO"], p=[0.60, 0.40])),
+                True,
+            )
+        )
+
+    # Typology 5: Stealth fraud (looks normal on observable features)
+    stealth_cards = rng.choice(num_cards, size=n_stealth_events, replace=False)
+    for c in stealth_cards:
+        d_stl = int(rng.integers(0, days))
+        h_stl = int(rng.integers(10, 19))
+        sec_stl = d_stl * 86400 + h_stl * 3600 + int(rng.integers(0, 3600))
+        amt_stl = round(float(rng.uniform(15.0, 85.0)), 2)
+        fraud_events.append(
+            (
+                int(c),
+                int(rng.choice(low_med_merchants)),
+                sec_stl,
+                amt_stl,
+                str(rng.choice(["POS", "ECOMMERCE"], p=[0.75, 0.25])),
+                True,
+            )
+        )
+
+    n_fraud = len(fraud_events)
+    target_legit = max(0, num_transactions - n_fraud)
+
+    # 2. Legit activity generation with lognormal rate and hard cap = 8
+    mu = -1.35
+    sigma = 0.65
+    raw_rates = np.clip(rng.lognormal(mu, sigma, size=num_cards), 0.01, 7.5)
+    day_weights_pattern = np.array(
+        [0.98, 0.98, 0.98, 1.0, 1.02, 1.05, 1.02], dtype=float
+    )
+    day_weights = np.array(
+        [day_weights_pattern[d % 7] for d in range(days)], dtype=float
+    )
+
+    daily_counts = np.minimum(rng.poisson(raw_rates[:, None] * day_weights[None, :]), 8)
+
+    diff = int(daily_counts.sum()) - target_legit
+    flat_counts = daily_counts.ravel()
+    if diff > 0:
+        flat_active = np.where(flat_counts > 0)[0]
+        trim_indices = rng.choice(flat_active, size=diff, replace=False)
+        np.subtract.at(flat_counts, trim_indices, 1)
+    elif diff < 0:
+        flat_can_add = np.where(flat_counts < 8)[0]
+        add_indices = rng.choice(flat_can_add, size=abs(diff), replace=False)
+        np.add.at(flat_counts, add_indices, 1)
+    daily_counts = flat_counts.reshape((num_cards, days))
+
+    card_indices, day_indices = np.where(daily_counts > 0)
+    repeats = daily_counts[card_indices, day_indices]
+    c_legit = np.repeat(card_indices, repeats)
+    d_legit = np.repeat(day_indices, repeats)
+    n_l = len(c_legit)
+
+    std_hour_probs = np.array(
+        [0.005] * 6 + [0.035] * 4 + [0.065] * 10 + [0.045] * 4, dtype=float
+    )
+    std_hour_probs /= std_hour_probs.sum()
+    owl_hour_probs = np.array([0.09] * 6 + [0.0175] * 16 + [0.09] * 2, dtype=float)
+    owl_hour_probs /= owl_hour_probs.sum()
+
+    h_std = rng.choice(24, size=n_l, p=std_hour_probs)
+    h_owl = rng.choice(24, size=n_l, p=owl_hour_probs)
+    h_legit = np.where(is_night_owl[c_legit], h_owl, h_std)
+
+    m_legit = rng.integers(0, 60, size=n_l)
+    s_legit = rng.integers(0, 60, size=n_l)
+    time_offsets_legit = d_legit * 86400 + h_legit * 3600 + m_legit * 60 + s_legit
+
+    use_fav = rng.random(size=n_l) < 0.75
+    fav_slot = rng.integers(0, 5, size=n_l)
+    general_m = rng.integers(0, num_merchants, size=n_l)
+
+    m_legit_arr = np.empty(n_l, dtype=np.int32)
+    for i in range(n_l):
+        c_i = c_legit[i]
+        d_i = d_legit[i]
+        # Check traveller persona
+        if (
+            is_traveller[c_i]
+            and travel_start_day[c_i] <= d_i < travel_start_day[c_i] + travel_dur[c_i]
+        ):
+            dest = chosen_travel_country[c_i]
+            dest_merchants = [
+                m for m in range(num_merchants) if merchant_countries[m] == dest
+            ]
+            if dest_merchants:
+                m_legit_arr[i] = dest_merchants[fav_slot[i] % len(dest_merchants)]
+            else:
+                m_legit_arr[i] = general_m[i]
+        elif use_fav[i]:
+            favs = card_favs[c_i]
+            m_legit_arr[i] = favs[fav_slot[i] % len(favs)]
+        else:
+            m_legit_arr[i] = general_m[i]
+
+    amt_legit = np.round(rng.exponential(scale=50.0, size=n_l) + 5.0, 2)
+    # Legit shopping outliers (2% of txns)
+    outlier_mask = rng.random(size=n_l) < 0.02
+    if outlier_mask.any():
+        amt_legit[outlier_mask] = np.round(
+            amt_legit[outlier_mask]
+            + rng.uniform(200.0, 1000.0, size=int(outlier_mask.sum())),
+            2,
+        )
+
+    chan_legit = rng.choice(
+        ["POS", "ECOMMERCE", "ATM", "MOTO"],
+        p=[0.60, 0.32, 0.05, 0.03],
+        size=n_l,
+    )
+
+    # 3. Combine Legit and Fraud Arrays
+    all_cards = np.concatenate([c_legit, [r[0] for r in fraud_events]])
+    all_merchants = np.concatenate([m_legit_arr, [r[1] for r in fraud_events]])
+    all_times = np.concatenate([time_offsets_legit, [r[2] for r in fraud_events]])
+    all_amts = np.concatenate([amt_legit, [r[3] for r in fraud_events]])
+    all_chans = np.concatenate([chan_legit, [r[4] for r in fraud_events]])
+    all_fraud = np.concatenate(
+        [np.zeros(n_l, dtype=bool), [r[5] for r in fraud_events]]
+    )
+
+    # Sort strictly chronologically
+    sort_order = np.argsort(all_times, kind="stable")
+    all_cards = all_cards[sort_order]
+    all_merchants = all_merchants[sort_order]
+    all_times = all_times[sort_order]
+    all_amts = all_amts[sort_order]
+    all_chans = all_chans[sort_order]
+    all_fraud = all_fraud[sort_order]
+
+    # Pre-draw statuses and dispute attributes
+    statuses = rng.choice(
+        ["APPROVED", "DECLINED", "REFUNDED"],
+        p=[0.95, 0.04, 0.01],
+        size=num_transactions,
+    )
+    disp_rand = rng.random(size=num_transactions)
+    disp_p = np.where(all_fraud, 0.65, 0.0077)
+    has_dispute = disp_rand < disp_p
 
     fraud_reasons = ["10.4", "10.5", "4837"]
     non_fraud_reasons = ["13.1", "13.3", "12.1", "11.3", "4853", "4834"]
+    disp_status_choices = ["OPEN", "UNDER_REVIEW", "WON", "LOST"]
+    disp_status_probs = [0.40, 0.30, 0.15, 0.15]
 
-    start_date = datetime.datetime(2026, 8, 1, 0, 0, 0, tzinfo=datetime.UTC)
-    total_seconds = 90 * 86400  # 90-day window
+    total_fraud_count = int(all_fraud.sum())
+    total_dispute_count = int(has_dispute.sum())
 
-    total_fraud_count = 0
-    total_dispute_count = 0
-
+    # Streaming COPY into PostgreSQL in chunks
     num_batches = (num_transactions + batch_size - 1) // batch_size
-
     for b in range(num_batches):
-        cur_batch_size = min(batch_size, num_transactions - b * batch_size)
-        batch_offset = b * batch_size
-
-        c_indices = rng.choice(num_cards, p=weights, size=cur_batch_size)
-        m_indices = rng.integers(0, num_merchants, size=cur_batch_size)
-
-        time_offsets = rng.integers(0, total_seconds, size=cur_batch_size)
-        time_offsets.sort()
-
-        batch_channels = rng.choice(channels, p=channel_probs, size=cur_batch_size)
-        batch_statuses = rng.choice(statuses, p=status_probs, size=cur_batch_size)
-        batch_amounts = np.round(
-            rng.exponential(scale=65.0, size=cur_batch_size) + 5.0, 2
-        )
-        outlier_mask = rng.random(size=cur_batch_size) < 0.02
-        if outlier_mask.any():
-            add_vals = rng.uniform(400, 2500, size=outlier_mask.sum())
-            batch_amounts[outlier_mask] = np.round(
-                batch_amounts[outlier_mask] + add_vals, 2
-            )
-
-        batch_velocities = rng.poisson(1.5, size=cur_batch_size)
-        batch_is_new_merch = rng.random(size=cur_batch_size) < 0.20
+        start_idx = b * batch_size
+        end_idx = min(num_transactions, (b + 1) * batch_size)
+        cur_batch_len = end_idx - start_idx
 
         txn_buf = io.StringIO()
         disp_buf = io.StringIO()
 
-        for i in range(cur_batch_size):
-            global_idx = batch_offset + i
-            c_idx = c_indices[i]
-            m_idx = m_indices[i]
+        for i in range(cur_batch_len):
+            global_idx = start_idx + i
+            c_idx = all_cards[global_idx]
+            m_idx = all_merchants[global_idx]
 
             t_token = card_tokens[c_idx]
             t_m_id = merchant_ids[m_idx]
@@ -337,74 +685,42 @@ def seed_transactions_and_disputes(
             t_risk = merchant_risks[m_idx]
             t_is_intl = card_countries[c_idx] != merchant_countries[m_idx]
 
-            txn_dt = start_date + datetime.timedelta(seconds=int(time_offsets[i]))
+            txn_dt = start_date + datetime.timedelta(seconds=int(all_times[global_idx]))
             txn_hour = txn_dt.hour
             txn_dt_str = txn_dt.isoformat()
 
-            amt = batch_amounts[i]
-            chan = batch_channels[i]
-            stat = batch_statuses[i]
-
-            night_sig = 1.3 if txn_hour in (0, 1, 2, 3, 4, 5) else -0.3
-            risk_sig = (
-                1.6 if t_risk == "HIGH" else (0.4 if t_risk == "MEDIUM" else -0.6)
-            )
-            chan_sig = 1.1 if chan in ("ECOMMERCE", "MOTO") else -0.7
-            intl_sig = 1.4 if t_is_intl else -0.2
-            new_merch_sig = 0.8 if batch_is_new_merch[i] else -0.2
-            vel_sig = 1.3 if batch_velocities[i] > 4 else -0.2
-            amt_sig = 1.2 if amt > 500 else -0.3
-
-            feature_score = (
-                night_sig
-                + risk_sig
-                + chan_sig
-                + intl_sig
-                + new_merch_sig
-                + vel_sig
-                + amt_sig
-            )
-            noise = float(rng.normal(0, 1.2))
-            logit = -6.8 + 0.55 * feature_score + noise
-            p_feature = 1.0 / (1.0 + np.exp(-logit))
-
-            is_feature_fraud = bool(rng.random() < p_feature)
-            is_stealth_fraud = bool(rng.random() < 0.0008)
-            is_fraud = is_feature_fraud or is_stealth_fraud
+            amt = all_amts[global_idx]
+            chan = all_chans[global_idx]
+            stat = statuses[global_idx]
+            is_frd = bool(all_fraud[global_idx])
 
             idx_hash = hashlib.md5(f"{global_idx}_{seed}".encode()).hexdigest()[:8]
             txn_id = f"txn_{global_idx:010d}_{idx_hash}"
 
-            if is_fraud:
-                total_fraud_count += 1
-
             txn_row = (
                 f"{txn_id}\t{t_token}\t{t_m_id}\t{amt:.2f}\tUSD\t"
                 f"{txn_dt_str}\t{txn_hour}\t{chan}\t{t_mcc}\t{t_risk}\t"
-                f"{t_is_intl}\t{stat}\t{is_fraud}\t{txn_dt_str}\n"
+                f"{t_is_intl}\t{stat}\t{is_frd}\t{txn_dt_str}\n"
             )
             txn_buf.write(txn_row)
 
-            p_disp = 0.65 if is_fraud else 0.008
-            if rng.random() < p_disp:
-                total_dispute_count += 1
+            if has_dispute[global_idx]:
                 dsp_hash = hashlib.md5(f"dsp_{global_idx}_{seed}".encode()).hexdigest()[
                     :8
                 ]
                 disp_id = f"dsp_{global_idx:010d}_{dsp_hash}"
                 reason = (
                     rng.choice(fraud_reasons)
-                    if is_fraud
+                    if is_frd
                     else rng.choice(non_fraud_reasons)
                 )
-                d_status = rng.choice(disp_statuses, p=disp_status_probs)
-
+                d_status = rng.choice(disp_status_choices, p=disp_status_probs)
                 filed_dt = txn_dt + datetime.timedelta(days=int(rng.integers(1, 15)))
                 due_dt = filed_dt + datetime.timedelta(days=30)
                 resolved_dt_str = "\\N"
                 if d_status in ("WON", "LOST"):
                     res_dt = filed_dt + datetime.timedelta(
-                        days=int(rng.integers(10, 40))
+                        days=int(rng.integers(5, 30))
                     )
                     resolved_dt_str = res_dt.isoformat()
 
@@ -478,8 +794,14 @@ def run_seed(
 
         elapsed = time.time() - start_time
 
+        logger.info(
+            "Generator V2 Parameter Hash: %s",
+            GENERATOR_PARAMS_HASH,
+        )
+
         return {
             "elapsed_seconds": elapsed,
+            "generator_params_hash": GENERATOR_PARAMS_HASH,
             "reason_codes": rc_count,
             "merchants": len(merchants),
             "cards": len(cards),

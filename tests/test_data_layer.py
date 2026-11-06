@@ -187,6 +187,105 @@ def test_fraud_and_dispute_rates_within_bounds() -> None:
     ), f"Dispute rate {dispute_rate*100:.3f}% is out of bounds around 1%"
 
 
+def test_no_legit_card_exceeds_daily_cap() -> None:
+    """No legitimate card account exceeds the hard cap of 8 transactions per day."""
+    conn_str = _get_connection_string()
+    with psycopg.connect(conn_str) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT card_token, timestamp::date AS txn_date, count(*) AS daily_count
+            FROM transactions
+            WHERE is_fraud = false
+            GROUP BY card_token, timestamp::date
+            HAVING count(*) > 8;
+            """
+        )
+        violations = cur.fetchall()
+        assert (
+            not violations
+        ), f"Found legit cards exceeding 8 transactions/day: {violations[:5]}"
+
+
+def test_fraud_bursts_and_typologies_exist() -> None:
+    """Bursts and micro-testing fraud typologies are present in the dataset."""
+    conn_str = _get_connection_string()
+    with psycopg.connect(conn_str) as conn, conn.cursor() as cur:
+        # Verify card bursts: cards with >= 2 frauds
+        cur.execute(
+            """
+            SELECT card_token, count(*) AS fraud_count
+            FROM transactions
+            WHERE is_fraud = true
+            GROUP BY card_token
+            HAVING count(*) >= 2;
+            """
+        )
+        burst_cards = cur.fetchall()
+        assert (
+            len(burst_cards) >= 1
+        ), "Expected at least one card burst with >= 2 frauds"
+
+        # Verify micro-testing fraud: tiny fraud transactions under $5.00
+        cur.execute(
+            """
+            SELECT count(*)
+            FROM transactions
+            WHERE is_fraud = true AND amount < 5.00;
+            """
+        )
+        micro_row = cur.fetchone()
+        assert micro_row is not None
+        micro_count = micro_row[0]
+        assert micro_count >= 1, "Expected at least one micro-testing fraud under $5.00"
+
+
+def test_history_coupling_txn_count_1h() -> None:
+    """Fraud rate for rows with txn_count_1h >= 3 is clearly above the base rate."""
+    conn_str = _get_connection_string()
+    with psycopg.connect(conn_str) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH ordered_txns AS (
+                SELECT
+                    transaction_id,
+                    card_token,
+                    timestamp,
+                    is_fraud,
+                    count(*) OVER (
+                        PARTITION BY card_token
+                        ORDER BY timestamp
+                        RANGE BETWEEN INTERVAL '1 hour' PRECEDING
+                            AND INTERVAL '1 microsecond' PRECEDING
+                    ) AS prior_count_1h
+                FROM transactions
+            )
+            SELECT
+                count(*) AS total_txns,
+                count(*) FILTER (WHERE is_fraud) AS total_frauds,
+                count(*) FILTER (WHERE prior_count_1h >= 3) AS high_vel_txns,
+                count(*) FILTER (
+                    WHERE prior_count_1h >= 3 AND is_fraud
+                ) AS high_vel_frauds
+            FROM ordered_txns;
+            """
+        )
+        row = cur.fetchone()
+        assert row is not None
+        total_txns, total_frauds, high_vel_txns, high_vel_frauds = row
+
+    base_rate = total_frauds / total_txns if total_txns else 0.0
+    assert (
+        high_vel_txns >= 1
+    ), "Expected at least one transaction with prior_count_1h >= 3"
+    high_vel_rate = high_vel_frauds / high_vel_txns
+    lift = high_vel_rate / base_rate if base_rate else 0.0
+    msg = (
+        f"Expected velocity coupling lift >= 3.0x, but got {lift:.2f}x "
+        f"(base={base_rate*100:.3f}%, high_vel={high_vel_rate*100:.3f}%)"
+    )
+    assert lift >= 3.0, msg
+
+
 def test_foreign_key_integrity() -> None:
     """All foreign key references are valid, and invalid references are rejected."""
     conn_str = _get_connection_string()

@@ -93,40 +93,54 @@ The database consists of 5 core tables hosted in PostgreSQL 16:
 
 ---
 
-## 3. Synthetic Data Generator Logic
+## 3. Synthetic Data Generator Logic (Generator V2)
 
-### 3.1. Stochastic, Non-Deterministic Fraud Model
-Fraud generation is **non-deterministic** and incorporates latent stochastic noise:
+The synthetic payment data generator was upgraded in Phase 5.2 to **Generator V2**. Generator V2 replaces per-row stochastic coin flips with structural event typologies grounded in payment fraud domain patterns.
 
-1. **Feature Score ($S$)**:
-   $$\begin{aligned}
-   S = &\ \text{night\_signal}(\text{txn\_hour}) \\
-   & + \text{risk\_tier\_signal}(\text{risk\_tier}) \\
-   & + \text{channel\_signal}(\text{channel}) \\
-   & + \text{intl\_signal}(\text{is\_international}) \\
-   & + \text{new\_merch\_signal}(\text{is\_new\_merchant}) \\
-   & + \text{velocity\_signal}(\text{velocity}_{24h}) \\
-   & + \text{amount\_signal}(\text{amount})
-   \end{aligned}$$
+### 3.1. Integrity & Parameter Immutability
+Generator V2 parameters are immutable and defined in `GENERATOR_V2_CONFIG`. The SHA-256 fingerprint of the parameter specification is:
+```
+GENERATOR_PARAMS_HASH = 4cb99e8f5b9a7cafcd4a0e72e6f2ebdafeed7b98533634088a2c488623266332
+```
+This configuration is frozen and deterministic for `seed=42`. Parameters are not retroactively tuned to fit model metrics.
 
-   - $\text{night\_signal} = +1.3$ if $\text{txn\_hour} \in \{0, 1, 2, 3, 4, 5\}$, else $-0.3$.
-   - $\text{risk\_tier\_signal} = +1.6$ for `HIGH`, $+0.4$ for `MEDIUM`, $-0.6$ for `LOW`.
-   - $\text{channel\_signal} = +1.1$ for `ECOMMERCE`/`MOTO`, $-0.7$ for `POS`/`ATM`.
-   - $\text{intl\_signal} = +1.4$ for international, $-0.2$ for domestic.
-   - $\text{new\_merch\_signal} = +0.8$ for first transaction at merchant, $-0.2$ otherwise.
-   - $\text{velocity\_signal} = +1.3$ if 24h card velocity $> 4$, $-0.2$ otherwise.
-   - $\text{amount\_signal} = +1.2$ if $\text{amount} > \$500$, $-0.3$ otherwise.
+### 3.2. Legitimate Activity Modeling
+1. **Per-Card Daily Rate**:
+   - Drawn from a lognormal distribution: $\lambda_c \sim \text{Lognormal}(\mu=-1.35, \sigma=0.65)$, clipped to $[0.01, 7.5]$.
+   - Realized daily activity: median $\approx 0.17$ to $0.30$ txns/day, 99th percentile $< 3.0$ txns/day.
+   - **Hard Cap**: Strictly $\le 8$ transactions per card on any single calendar day.
+2. **Card Favorite Merchants**:
+   - Each card is assigned $K_c \in [5, 15]$ favorite merchants.
+   - 75% of legitimate transactions choose from the card's favorites, while 25% sample from the general merchant pool.
+   - *Result*: Establishes realistic recurring merchant patterns; first visits to outside merchants give meaningful signal to `is_new_merchant_for_card`.
+3. **Diurnal and Persona Variations**:
+   - Standard cards: activity peaks between 10:00 and 19:59 (only ~3% of transactions occurring during night hours 00:00–05:59).
+   - Habitual Night Owls (~4% of cards): inverted diurnal distribution with 72% of transactions occurring between 22:00 and 05:59.
+   - Natural Travellers (~3% of cards): assigned a 3–7 day foreign window where merchants are located in a destination country ($M_{\text{country}} \neq C_{\text{issuer}}$).
+   - Legit Shopping Spikes: ~2% of transactions feature high-value shopping additions (\$200–\$1,000).
 
-2. **Noisy Latent Logit & Probability**:
-   $$\text{logit} = -6.8 + 0.55 \cdot S + \epsilon, \quad \epsilon \sim \mathcal{N}(0, 1.2^2)$$
-   $$P_{\text{feature}} = \frac{1}{1 + e^{-\text{logit}}}$$
+### 3.3. Event-Driven Fraud Typologies
+Fraud transactions (calibrated to 0.2%–0.5% of total transactions, target ~0.35%) are generated as distinct event patterns:
+1. **Compromised-Card Bursts** (~35% of fraud):
+   - 2 to 8 transactions within a 1 to 6 hour window on the same card.
+   - Escalating amounts: successive transactions strictly increase in value (\$35 $\to$ \$1,200).
+   - Primarily new merchants (outside the card's favorite set), high/medium risk tiers, often ECOMMERCE or MOTO.
+2. **Card Testing** (~20% of fraud):
+   - 3 to 10 rapid micro-transactions (under \$5.00) within 1 to 15 minutes at online merchants (ECOMMERCE, HIGH risk tier).
+   - In 50% of testing events, followed 10–30 minutes later by a single large unauthorized transaction (\$500–\$2,200).
+3. **Geographic Jump / Velocity Anomaly** (~15% of fraud):
+   - An international transaction occurring 30 to 80 minutes after a legitimate domestic transaction on the same card (impossible physical travel speed).
+4. **Opportunistic High-Value Fraud** (~10% of fraud):
+   - Single isolated transaction at an unvisited merchant during night hours (00:00–05:59) with high amount (\$600–\$3,500).
+5. **Stealth Fraud** (~20% of fraud):
+   - Transactions that mimic normal user behavior across all observable features: domestic, daytime, ordinary amounts (\$15–\$85), POS/ECOMMERCE, LOW/MEDIUM risk tiers.
 
-3. **Stealth Fraud & False Alarms**:
-   - **Stealth / Normal Fraud (~20% of total fraud)**: An independent base probability triggers low-profile fraud on ordinary, low-risk transactions (e.g. small amount, domestic daytime POS).
-   - **False Alarms**: Legitimate cardholders routinely travel abroad, make high-value purchases, or shop online at night, generating high feature scores without being flagged as fraud.
-
-### 3.2. Dispute Generation
+### 3.4. Dispute Generation
 - **Fraud Transactions**: Approximately 65% result in disputes (`10.4`, `10.5`, `4837`).
-- **Legitimate Transactions**: Approximately 0.8% result in commercial disputes (`13.1`, `13.3`, `12.1`, `11.3`, `4853`, `4834`).
-- **Target Rates**: Fraud rate calibrated to 0.2%–0.5% (approx 0.30%); dispute rate calibrated to approx 1.0%.
+- **Legitimate Transactions**: Approximately 0.77% result in commercial disputes (`13.1`, `13.3`, `12.1`, `11.3`, `4853`, `4834`).
+- **Target Rates**: Fraud rate calibrated to 0.2%–0.5% (~0.35%); dispute rate calibrated to approx 1.00%.
+- **Lifecycle & Resolution**:
+  - `filed_at`: 1–15 days after transaction timestamp.
+  - `status`: `OPEN` (40%), `UNDER_REVIEW` (30%), `WON` (15%), `LOST` (15%).
+  - `resolved_at`: 5–30 days after filing for resolved statuses, `NULL` for open disputes.
 
