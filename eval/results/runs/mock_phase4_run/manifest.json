@@ -1,0 +1,22 @@
+{
+  "run_id": "mock_phase4_run",
+  "timestamp_utc": "2026-11-05T11:49:07.758160+00:00",
+  "git_commit": "5a8c7b1261c3c3c35c46cb2a960eedef6a7c6161",
+  "git_dirty": true,
+  "mock": true,
+  "golden_set_path": "eval/golden_set.jsonl",
+  "golden_set_sha256": "c040d7b06e52a02ae139340f9c04fb62dbd00558a2b9cbee65ba577887e1ef82",
+  "eval_configs": [
+    "dense",
+    "hybrid",
+    "hybrid+parent-child"
+  ],
+  "generator_model": "gemini-flash-lite-latest",
+  "generator_temperature": 0.0,
+  "judge_provider": "gemini",
+  "judge_model": "",
+  "judge_rpm": 5,
+  "judge_rpd": 20,
+  "ragas_version": "0.4.3",
+  "seed": 42
+}

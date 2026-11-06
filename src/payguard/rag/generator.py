@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from tenacity import (
+    Retrying,
     before_sleep_log,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -46,6 +46,8 @@ class GenerationResult:
     model: str
     prompt_tokens: int | None
     completion_tokens: int | None
+    retry_count: int = 0
+    backoff_ms: float = 0.0
 
 
 class MissingLLMKeyError(RuntimeError):
@@ -171,25 +173,35 @@ class AnswerGenerator:
             f"QUESTION:\n{question}\n"
         )
 
-        @retry(
-            reraise=True,
-            stop=stop_after_attempt(self.settings.llm_max_retries),
-            wait=wait_exponential(multiplier=1, min=1, max=30),
-            retry=retry_if_exception_type(Exception),
-            before_sleep=before_sleep_log(logger, logging.WARNING),
-        )
-        def _call() -> Any:
-            try:
-                return self._llm.invoke(prompt)
-            except Exception as exc:  # noqa: BLE001
-                if "429" in str(exc):
+        retry_stats = {"count": 0, "backoff_ms": 0.0}
+
+        def _before_sleep(retry_state: Any) -> None:
+            retry_stats["count"] += 1
+            if (
+                retry_state.next_action is not None
+                and retry_state.next_action.sleep is not None
+            ):
+                retry_stats["backoff_ms"] += (
+                    float(retry_state.next_action.sleep) * 1000.0
+                )
+            if retry_state.outcome and retry_state.outcome.failed:
+                exc = retry_state.outcome.exception()
+                if exc and "429" in str(exc):
                     logger.warning(
                         "llm_rate_limited",
                         extra={"provider": self._provider, "model": self._model},
                     )
-                raise
+            before_sleep_log(logger, logging.WARNING)(retry_state)
 
-        message = _call()
+        retrying = Retrying(
+            reraise=True,
+            stop=stop_after_attempt(self.settings.llm_max_retries),
+            wait=wait_exponential(multiplier=1, min=1, max=30),
+            retry=retry_if_exception_type(Exception),
+            before_sleep=_before_sleep,
+        )
+
+        message = retrying(self._llm.invoke, prompt)
         content = getattr(message, "content", str(message))
         if isinstance(content, list):
             content = "".join(
@@ -211,4 +223,6 @@ class AnswerGenerator:
             model=self._model,
             prompt_tokens=usage.get("input_tokens"),
             completion_tokens=usage.get("output_tokens"),
+            retry_count=int(retry_stats["count"]),
+            backoff_ms=round(retry_stats["backoff_ms"], 2),
         )

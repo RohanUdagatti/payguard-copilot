@@ -3,7 +3,7 @@ PIP ?= pip
 COMPOSE ?= docker compose
 PACKAGE_EXTRAS ?= .[core,dev,rag]
 
-.PHONY: up down test lint format typecheck install env ingest rag-serve
+.PHONY: up down test lint format typecheck install env ingest rag-serve eval-gate eval-baseline
 
 ingest: env
 	QDRANT_HOST=localhost $(PYTHON) scripts/ingest.py --docs-dir data/raw_docs $(INGEST_ARGS)
@@ -38,3 +38,9 @@ format:
 
 typecheck:
 	$(PYTHON) -m mypy src/payguard
+
+eval-gate:
+	$(PYTHON) scripts/eval_gate.py $(EVAL_ARGS)
+
+eval-baseline:
+	$(PYTHON) scripts/eval_gate.py --create-baseline $(EVAL_ARGS)

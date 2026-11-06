@@ -52,6 +52,57 @@ make lint
 make typecheck
 ```
 
+## Phase 4: Evaluation Harness (Golden Set + RAGAS + CI Gate)
+
+The Phase 4 evaluation pipeline benchmarks RAG configurations (`dense`, `hybrid`, `hybrid+parent-child`) across verified domain questions with LLM-as-a-judge scoring, confidence intervals, and automated CI regression gates.
+
+### 1. Golden Question Dataset & Validation
+Stored in `eval/golden_set.jsonl`. Only a human reviewer may set `verified=true`. Questions must follow the `GoldenQuestion` schema:
+```bash
+python scripts/validate_golden_set.py
+```
+Validates question types (`lookup`, `paraphrase`, `near_miss`, `multi_section`, `out_of_scope`), ensures out-of-scope items enforce strict abstention, and rejects questions containing Luhn-valid card numbers (PANs).
+
+### 2. Proposing Synthetic Candidate Questions
+Generate stratified candidates across compliance PDFs with automatic import from `eval/manual_questions.yaml`:
+```bash
+python scripts/generate_testset.py --dry-run
+python scripts/generate_testset.py --limit 10 --mock
+```
+Candidates are marked with `verified=false` and `needs_ground_truth=true` in `eval/golden_candidates.jsonl` until reviewed by a domain expert.
+
+### 3. Running RAGAS Evaluation
+Evaluation is separated into Stage 1 (`generate`) and Stage 2 (`judge`) with rate limiting and checkpointing:
+```bash
+# Print dry-run API call estimates:
+python scripts/run_ragas.py --dry-run
+
+# Run offline smoke test without API calls:
+python scripts/run_ragas.py --mock --yes --run-id smoke_test_run
+
+# Live evaluation (requires JUDGE_MODEL in .env and --yes flag):
+python scripts/run_ragas.py --yes
+```
+
+### 4. Generating Ablation Reports
+Generates `eval/results/ablation.md` with 95% non-parametric bootstrap confidence intervals (1,000 resamples), retrieval metrics, latencies, and judge error accounting:
+```bash
+python scripts/make_report.py
+```
+
+### 5. CI Evaluation Gate & Baseline Management
+The CI gate protects against quality regressions by comparing against `eval/baseline.json`:
+```bash
+# Snapshot approved evaluation run as baseline:
+make eval-baseline
+
+# Verify current run meets or exceeds baseline:
+make eval-gate
+```
+
+> [!WARNING] Self-Preference Limitation
+> When the generator and judge share the same model family, RAGAS evaluation scores may exhibit self-preference bias. Evaluator models should ideally be drawn from an independent model family when production budgets permit.
+
 ## Layout
 
 ```text

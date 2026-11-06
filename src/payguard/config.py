@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     # LLM / RAG
     llm_provider: str = Field(default="gemini")
     llm_model: str = Field(default="gemini-3.8-flash")
+
+    @field_validator("llm_model")
+    @classmethod
+    def _validate_llm_model(cls, v: str) -> str:
+        if v and v.endswith("-latest"):
+            raise ValueError(
+                f"LLM_MODEL={v!r} is invalid: must be a pinned model name, "
+                "not an unpinned '-latest' alias."
+            )
+        return v
+
     llm_timeout_seconds: float = Field(default=60.0)
     llm_max_retries: int = Field(default=3)
     gemini_api_key: str = Field(default="")
@@ -82,12 +93,51 @@ class Settings(BaseSettings):
     rag_score_threshold: float = Field(default=0.2)
     rag_docs_dir: str = Field(default="data/raw_docs")
 
-    @field_validator("llm_provider", "embedding_provider", mode="before")
+    # Phase 3: Advanced Retrieval Feature Flags & Configs
+    retrieval_mode: str = Field(default="dense")
+    rerank_enabled: bool = Field(default=False)
+    rerank_model: str = Field(default="BAAI/bge-reranker-base")
+    rerank_top_n: int = Field(default=20)
+    parent_child_enabled: bool = Field(default=False)
+    child_chunk_tokens: int = Field(default=200)
+    child_chunk_overlap: int = Field(default=50)
+    multi_query_enabled: bool = Field(default=False)
+    multi_query_count: int = Field(default=3)
+    temporal_filter_enabled: bool = Field(default=False)
+    cache_enabled: bool = Field(default=False)
+    cache_similarity_threshold: float = Field(default=0.998)
+    cache_ttl_seconds: int = Field(default=3600)
+    ingest_version: str = Field(default="1.0.0")
+
+    # Phase 4: Evaluation & Judge Settings
+    judge_provider: str = Field(default="gemini")
+    judge_model: str = Field(default="")
+    judge_rpm: int = Field(default=5)
+    judge_rpd: int = Field(default=20)
+    judge_timeout_seconds: float = Field(default=60.0)
+    eval_run_id: str = Field(default="")
+
+    @field_validator(
+        "llm_provider", "embedding_provider", "retrieval_mode", mode="before"
+    )
     @classmethod
     def _normalize_provider(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip().lower()
         return value
+
+    def retrieval_config_hash(self) -> str:
+        """Return a deterministic hash of active retrieval settings."""
+        import hashlib
+
+        payload = (
+            f"{self.retrieval_mode}:"
+            f"{self.rerank_enabled}:{self.rerank_model}:{self.rerank_top_n}:"
+            f"{self.parent_child_enabled}:{self.multi_query_enabled}:"
+            f"{self.temporal_filter_enabled}:{self.rag_top_k}:"
+            f"{self.embedding_provider}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
     def resolve_gemini_api_key(self) -> str:
         """Return Gemini key, preferring GEMINI_API_KEY over GOOGLE_API_KEY."""
@@ -113,6 +163,19 @@ class Settings(BaseSettings):
         raise ValueError(
             f"Unsupported LLM_PROVIDER={provider!r}. Supported: gemini, openai."
         )
+
+    def validate_judge_config(self) -> None:
+        """Validate judge model configuration according to Phase 4 rules."""
+        if not self.judge_model:
+            raise ValueError(
+                "JUDGE_MODEL has no default and must be explicitly set "
+                "via environment or flag."
+            )
+        if "-latest" in self.judge_model:
+            raise ValueError(
+                f"JUDGE_MODEL={self.judge_model!r} is invalid: must be a pinned "
+                "model name, not an unpinned '-latest' alias."
+            )
 
     def require_active_embedding_key(self) -> str | None:
         """Validate the active embedding provider and return a key if required."""

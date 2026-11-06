@@ -39,13 +39,23 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan hook for startup and shutdown logging."""
+    """Application lifespan hook for startup, warm-up, and shutdown logging."""
     settings: Settings = app.state.settings
     configure_logging(settings.log_level)
     logger.info(
         "application_started",
         extra={"app_name": settings.app_name, "version": settings.app_version},
     )
+    # Step 0: Warm up the embedding model at app startup
+    try:
+        from payguard.rag.pipeline import RAGPipeline
+
+        pipeline = RAGPipeline(settings)
+        pipeline.embedder.embed_query("warmup")
+        app.state.rag_pipeline = pipeline
+        logger.info("embedding_model_warmed_up")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("embedding_model_warmup_failed", extra={"error": str(exc)})
     yield
     logger.info("application_stopped")
 
