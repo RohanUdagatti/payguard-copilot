@@ -47,7 +47,13 @@ rag = [
     "fastembed>=0.5.1",
     "redis>=5.0.0",
 ]
-ml = []
+ml = [
+    "xgboost==2.1.4",
+    "scikit-learn==1.6.1",
+    "shap==0.46.0",
+    "joblib==1.4.2",
+    "mlflow==3.18.0",
+]
 data = [
     "sqlalchemy==2.0.38",
     "alembic==1.14.1",
@@ -69,6 +75,7 @@ where = ["src"]
 [tool.black]
 line-length = 88
 target-version = ["py311"]
+force-exclude = "src/payguard/data/db\\.py"
 
 [tool.ruff]
 line-length = 88
@@ -104,6 +111,13 @@ module = [
     "psycopg.*",
     "alembic.*",
     "faker.*",
+    "pandas",
+    "pandas.*",
+    "xgboost.*",
+    "sklearn.*",
+    "shap.*",
+    "joblib.*",
+    "mlflow.*",
 ]
 ignore_missing_imports = true
 

@@ -1,6 +1,7 @@
 """Application configuration loaded from environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -65,6 +66,11 @@ class Settings(BaseSettings):
     # LLM / RAG
     llm_provider: str = Field(default="gemini")
     llm_model: str = Field(default="gemini-3.8-flash")
+
+    # ML & Fraud Model
+    model_dir: Path = Field(default=Path("models"))
+    mlflow_tracking_uri: str = Field(default="file:./mlruns")
+    false_alarm_cost: float = Field(default=25.0)
 
     @field_validator("llm_model")
     @classmethod

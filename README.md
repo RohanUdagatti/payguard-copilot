@@ -15,7 +15,7 @@ Enterprise GenAI platform for payment disputes, fraud and compliance.
 cp .env.example .env
 # add GEMINI_API_KEY=... to .env
 conda activate payguard   # or any Python 3.11 env
-pip install -e ".[core,dev,rag,data]"
+pip install -e ".[core,dev,rag,data,ml]"
 ```
 
 ## Run infrastructure + API
@@ -120,6 +120,25 @@ make eval-gate
 
 > [!WARNING] Self-Preference Limitation
 > When the generator and judge share the same model family, RAGAS evaluation scores may exhibit self-preference bias. Evaluator models should ideally be drawn from an independent model family when production budgets permit.
+
+## Fraud Model Service (Phase 5)
+
+Point-in-time XGBoost fraud model service with probability calibration, cost threshold optimization, and SHAP explanations:
+
+```bash
+# Train, calibrate, evaluate, and save fraud model:
+make train
+
+# Score a transaction via API gateway:
+curl -s http://localhost:8000/ml/score \
+  -H 'content-type: application/json' \
+  -d '{"txn_id": "txn_0000000000_c4addab5"}'
+
+# Optional Kaggle benchmark:
+make ml-benchmark-kaggle
+```
+
+Details on feature engineering, zero-leakage constraints, cost matrix, and SHAP log-odds: [docs/fraud_model.md](docs/fraud_model.md).
 
 ## Layout
 

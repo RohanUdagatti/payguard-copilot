@@ -1,9 +1,9 @@
 PYTHON ?= python
 PIP ?= pip
 COMPOSE ?= docker compose
-PACKAGE_EXTRAS ?= .[core,dev,rag,data]
+PACKAGE_EXTRAS ?= .[core,dev,rag,data,ml]
 
-.PHONY: up down test lint format typecheck install env ingest rag-serve eval-gate eval-baseline migrate seed seed-large reset-db
+.PHONY: up down test lint format typecheck install env ingest rag-serve eval-gate eval-baseline migrate seed seed-large reset-db train ml-benchmark-kaggle
 
 ingest: env
 	QDRANT_HOST=localhost $(PYTHON) scripts/ingest.py --docs-dir data/raw_docs $(INGEST_ARGS)
@@ -57,4 +57,11 @@ seed-large: env
 reset-db: env
 	$(PYTHON) -m alembic downgrade base
 	$(PYTHON) -m alembic upgrade head
+
+train: env
+	$(PYTHON) scripts/train_fraud.py
+
+ml-benchmark-kaggle: env
+	$(PYTHON) scripts/benchmark_kaggle.py
+
 

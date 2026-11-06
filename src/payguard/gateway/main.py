@@ -13,6 +13,7 @@ from pythonjsonlogger.json import JsonFormatter
 
 from payguard import __version__
 from payguard.config import Settings, get_settings
+from payguard.gateway.routes.ml import router as ml_router
 from payguard.gateway.routes.rag import router as rag_router
 
 
@@ -56,6 +57,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("embedding_model_warmed_up")
     except Exception as exc:  # noqa: BLE001
         logger.warning("embedding_model_warmup_failed", extra={"error": str(exc)})
+
+    # Step 1: Load fraud model if available
+    try:
+        from payguard.ml.service import FraudModelService
+
+        ml_service = FraudModelService(settings)
+        ml_service.load_model()
+        app.state.fraud_model_service = ml_service
+        logger.info(
+            "fraud_model_loaded",
+            extra={"model_version": ml_service.model_version},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("fraud_model_not_loaded", extra={"reason": str(exc)})
+        app.state.fraud_model_service = None
+
     yield
     logger.info("application_stopped")
 
@@ -70,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = resolved
     app.include_router(rag_router)
+    app.include_router(ml_router)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
